@@ -4,151 +4,236 @@ import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
 from datetime import datetime, timedelta
+import numpy as np
 
-st.set_page_config(page_title="Stock Market Dashboard", page_icon="📈", layout="wide")
+# Page config
+st.set_page_config(
+    page_title="Stock Market Dashboard",
+    page_icon="📈",
+    layout="wide"
+)
 
-st.markdown("""
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;600;700&display=swap');
-html, body, [class*="css"] { background-color: #0a0a1a; color: #fff; font-family: 'Inter', sans-serif; }
-.stApp { background-color: #0a0a1a; }
-.hero {
-    background: linear-gradient(135deg, #00FF00 0%, #00CC00 50%, #1a0a4a 100%);
-    padding: 2.5rem; border-radius: 20px; margin-bottom: 2rem; text-align: center;
-    box-shadow: 0 8px 32px rgba(0,255,0,0.3);
-}
-.hero h1 { font-family:'Bebas Neue',sans-serif; font-size:3.5rem; letter-spacing:4px; color:#fff; margin:0; }
-.hero p { color:#99ff99; margin-top:0.5rem; }
-.metric-card {
-    background: linear-gradient(135deg,#1a1a2e,#16213e); border:1px solid #00FF00;
-    border-radius:16px; padding:1.3rem; text-align:center; margin-bottom:1rem;
-    box-shadow:0 4px 15px rgba(0,255,0,0.15);
-}
-.metric-number { font-family:'Bebas Neue',sans-serif; font-size:2.5rem; color:#00FF00; }
-.metric-label { color:#aaa; font-size:0.8rem; text-transform:uppercase; letter-spacing:2px; }
-.section-title {
-    font-family:'Bebas Neue',sans-serif; font-size:1.8rem; color:#00FF00;
-    letter-spacing:3px; border-left:4px solid #00FF00; padding-left:12px; margin:1.5rem 0 1rem 0;
-}
-[data-testid="stSidebar"] { background-color:#0d0d1a !important; border-right:1px solid #00FF00; }
-.stTabs [data-baseweb="tab-list"] { background-color:#1a1a2e; border-radius:10px; }
-.stTabs [aria-selected="true"] { color:#00FF00 !important; border-bottom:2px solid #00FF00; }
-.stButton > button {
-    background:linear-gradient(135deg,#00FF00,#00CC00); color:#000; border:none;
-    border-radius:10px; font-weight:700; padding:0.6rem 2rem; transition:all 0.2s;
-}
-.stButton > button:hover { transform:scale(1.03); }
-#MainMenu, footer, header { visibility:hidden; }
-</style>
-""", unsafe_allow_html=True)
+# Title
+st.title("📊 Stock Market Dashboard")
+st.markdown("---")
 
-st.markdown("""
-<div class="hero">
-    <h1>📈 STOCK MARKET DASHBOARD</h1>
-    <p>Real-Time Stock Prices • Charts • Analysis • Portfolio</p>
-</div>
-""", unsafe_allow_html=True)
-
+# Sidebar
 with st.sidebar:
-    st.markdown("## 📊 Stock Search")
-    stock = st.text_input("Stock Symbol (e.g., RELIANCE.NS)", "RELIANCE.NS", label_visibility="collapsed")
-    period = st.selectbox("Time Period", ["1mo","3mo","6mo","1y","2y","5y"])
-    st.markdown("---")
-    st.info("Indian Stocks: RELIANCE.NS, TCS.NS, INFY.NS, HDFC.NS, WIPRO.NS")
+    st.header("⚙️ Settings")
+    
+    # Stock selection
+    stock_symbol = st.text_input("Stock Symbol", "AAPL").upper()
+    
+    # Date range
+    col1, col2 = st.columns(2)
+    with col1:
+        start_date = st.date_input("Start Date", datetime.now() - timedelta(days=365))
+    with col2:
+        end_date = st.date_input("End Date", datetime.now())
+    
+    # Indicators
+    st.subheader("Technical Indicators")
+    show_ma = st.checkbox("Moving Average", True)
+    ma_period = st.slider("MA Period", 5, 200, 50) if show_ma else None
+    
+    show_rsi = st.checkbox("RSI", False)
+    show_macd = st.checkbox("MACD", False)
+    
+    # Refresh button
+    refresh = st.button("🔄 Refresh Data")
 
+# Main content
 try:
-    ticker = yf.Ticker(stock)
-    hist = ticker.history(period=period)
-    info = ticker.info
+    # Fetch data
+    @st.cache_data(ttl=300)
+    def load_data(symbol, start, end):
+        stock = yf.Ticker(symbol)
+        df = stock.history(start=start, end=end)
+        return df, stock.info
     
-    if len(hist) > 0:
-        current_price = hist['Close'].iloc[-1]
-        prev_price = hist['Close'].iloc[0]
-        change = current_price - prev_price
-        change_pct = (change / prev_price * 100) if prev_price != 0 else 0
+    df, info = load_data(stock_symbol, start_date, end_date)
+    
+    if df.empty:
+        st.error(f"No data found for {stock_symbol}")
+        st.stop()
+    
+    # Top metrics
+    col1, col2, col3, col4, col5 = st.columns(5)
+    
+    current_price = df['Close'].iloc[-1]
+    prev_close = df['Close'].iloc[-2] if len(df) > 1 else current_price
+    change = current_price - prev_close
+    change_pct = (change / prev_close) * 100
+    
+    with col1:
+        st.metric("Current Price", f"${current_price:.2f}", 
+                 f"{change_pct:+.2f}%", delta_color="normal")
+    
+    with col2:
+        st.metric("Day High", f"${df['High'].iloc[-1]:.2f}")
+    
+    with col3:
+        st.metric("Day Low", f"${df['Low'].iloc[-1]:.2f}")
+    
+    with col4:
+        st.metric("Volume", f"{df['Volume'].iloc[-1]:,.0f}")
+    
+    with col5:
+        avg_volume = df['Volume'].tail(20).mean()
+        st.metric("Avg Volume (20d)", f"{avg_volume:,.0f}")
+    
+    st.markdown("---")
+    
+    # Company info
+    with st.expander("📋 Company Information"):
+        col1, col2 = st.columns(2)
+        with col1:
+            st.write(f"**Name:** {info.get('longName', 'N/A')}")
+            st.write(f"**Sector:** {info.get('sector', 'N/A')}")
+            st.write(f"**Industry:** {info.get('industry', 'N/A')}")
+        with col2:
+            st.write(f"**Market Cap:** ${info.get('marketCap', 0):,.0f}")
+            st.write(f"**P/E Ratio:** {info.get('trailingPE', 'N/A')}")
+            st.write(f"**52W High/Low:** ${info.get('fiftyTwoWeekHigh', 'N/A')} / ${info.get('fiftyTwoWeekLow', 'N/A')}")
+    
+    # Candlestick chart
+    st.subheader("📈 Price Chart")
+    
+    fig = go.Figure()
+    
+    # Candlestick
+    fig.add_trace(go.Candlestick(
+        x=df.index,
+        open=df['Open'],
+        high=df['High'],
+        low=df['Low'],
+        close=df['Close'],
+        name='Price'
+    ))
+    
+    # Moving Average
+    if show_ma:
+        ma = df['Close'].rolling(window=ma_period).mean()
+        fig.add_trace(go.Scatter(
+            x=df.index,
+            y=ma,
+            name=f'MA {ma_period}',
+            line=dict(color='orange', width=1)
+        ))
+    
+    fig.update_layout(
+        title=f'{stock_symbol} - Stock Price',
+        yaxis_title='Price (USD)',
+        xaxis_title='Date',
+        height=500,
+        template='plotly_dark'
+    )
+    
+    st.plotly_chart(fig, use_container_width=True)
+    
+    # RSI Indicator
+    if show_rsi:
+        st.subheader("📊 RSI Indicator")
         
-        c1, c2, c3, c4 = st.columns(4)
-        with c1:
-            st.markdown(f'<div class="metric-card"><div class="metric-number">₹{current_price:.2f}</div><div class="metric-label">Current Price</div></div>', unsafe_allow_html=True)
-        with c2:
-            color = "🟢" if change >= 0 else "🔴"
-            st.markdown(f'<div class="metric-card"><div class="metric-number">{color} {change:.2f}</div><div class="metric-label">Change</div></div>', unsafe_allow_html=True)
-        with c3:
-            st.markdown(f'<div class="metric-card"><div class="metric-number">{change_pct:.2f}%</div><div class="metric-label">Change %</div></div>', unsafe_allow_html=True)
-        with c4:
-            market_cap = info.get('marketCap', 0)
-            if market_cap > 0:
-                st.markdown(f'<div class="metric-card"><div class="metric-number">₹{market_cap/100000000:.0f}Cr</div><div class="metric-label">Market Cap</div></div>', unsafe_allow_html=True)
+        # Calculate RSI
+        delta = df['Close'].diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+        rs = gain / loss
+        rsi = 100 - (100 / (1 + rs))
         
-        tab1, tab2, tab3, tab4 = st.tabs(["📊 Chart", "📈 Stats", "💼 Info", "🔍 Details"])
+        fig_rsi = go.Figure()
+        fig_rsi.add_trace(go.Scatter(
+            x=df.index,
+            y=rsi,
+            name='RSI',
+            line=dict(color='purple', width=2)
+        ))
+        fig_rsi.add_hline(y=70, line_dash="dash", line_color="red", annotation_text="Overbought")
+        fig_rsi.add_hline(y=30, line_dash="dash", line_color="green", annotation_text="Oversold")
+        fig_rsi.update_layout(height=300, template='plotly_dark')
+        st.plotly_chart(fig_rsi, use_container_width=True)
+    
+    # Volume chart
+    st.subheader("📊 Volume Analysis")
+    
+    # Color volume bars based on price change
+    colors = ['green' if close >= open_ else 'red' 
+              for close, open_ in zip(df['Close'], df['Open'])]
+    
+    fig_volume = go.Figure()
+    fig_volume.add_trace(go.Bar(
+        x=df.index,
+        y=df['Volume'],
+        name='Volume',
+        marker_color=colors
+    ))
+    fig_volume.update_layout(height=300, template='plotly_dark')
+    st.plotly_chart(fig_volume, use_container_width=True)
+    
+    # MACD
+    if show_macd:
+        st.subheader("📈 MACD Indicator")
         
-        GREEN = "#00FF00"
+        # Calculate MACD
+        exp1 = df['Close'].ewm(span=12, adjust=False).mean()
+        exp2 = df['Close'].ewm(span=26, adjust=False).mean()
+        macd = exp1 - exp2
+        signal = macd.ewm(span=9, adjust=False).mean()
+        histogram = macd - signal
         
-        with tab1:
-            st.markdown('<div class="section-title">PRICE CHART</div>', unsafe_allow_html=True)
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(x=hist.index, y=hist['Close'],
-                                    mode='lines', name='Price',
-                                    line=dict(color=GREEN, width=3),
-                                    fill='tozeroy', fillcolor='rgba(0,255,0,0.1)'))
-            fig.update_layout(
-                plot_bgcolor="rgba(0,0,0,0)", 
-                paper_bgcolor="rgba(0,0,0,0)",
-                font=dict(color="white"), 
-                hovermode='x unified',
-                xaxis=dict(gridcolor="#222"),
-                yaxis=dict(gridcolor="#222")
-            )
-            st.plotly_chart(fig, use_container_width=True)
+        fig_macd = go.Figure()
+        fig_macd.add_trace(go.Scatter(x=df.index, y=macd, name='MACD', line=dict(color='blue')))
+        fig_macd.add_trace(go.Scatter(x=df.index, y=signal, name='Signal', line=dict(color='red')))
+        fig_macd.add_trace(go.Bar(x=df.index, y=histogram, name='Histogram', marker_color='gray'))
+        fig_macd.update_layout(height=300, template='plotly_dark')
+        st.plotly_chart(fig_macd, use_container_width=True)
+    
+    # Statistical Summary
+    with st.expander("📊 Statistical Summary"):
+        col1, col2 = st.columns(2)
         
-        with tab2:
-            st.markdown('<div class="section-title">TECHNICAL STATS</div>', unsafe_allow_html=True)
-            ma_50 = hist['Close'].rolling(50).mean().iloc[-1] if len(hist) >= 50 else 0
-            ma_200 = hist['Close'].rolling(200).mean().iloc[-1] if len(hist) >= 200 else 0
-            
+        with col1:
+            st.write("**Price Statistics**")
             stats_df = pd.DataFrame({
-                "Metric": ["52 Week High", "52 Week Low", "200 Day MA", "50 Day MA", "Volume Avg", "PE Ratio"],
-                "Value": [
-                    f"₹{info.get('fiftyTwoWeekHigh', 'N/A')}",
-                    f"₹{info.get('fiftyTwoWeekLow', 'N/A')}",
-                    f"₹{ma_200:.2f}" if ma_200 > 0 else "N/A",
-                    f"₹{ma_50:.2f}" if ma_50 > 0 else "N/A",
-                    f"{info.get('averageVolume', 'N/A'):,}",
-                    f"{info.get('trailingPE', 'N/A')}"
+                'Metric': ['Mean', 'Std Dev', 'Min', 'Max'],
+                'Value': [
+                    f"${df['Close'].mean():.2f}",
+                    f"${df['Close'].std():.2f}",
+                    f"${df['Close'].min():.2f}",
+                    f"${df['Close'].max():.2f}"
                 ]
             })
-            st.dataframe(stats_df, use_container_width=True, hide_index=True)
+            st.dataframe(stats_df, use_container_width=True)
         
-        with tab3:
-            st.markdown('<div class="section-title">COMPANY INFO</div>', unsafe_allow_html=True)
-            info_df = pd.DataFrame({
-                "Field": ["Sector", "Industry", "Website", "Employees", "Dividend Yield"],
-                "Value": [
-                    info.get('sector', 'N/A'),
-                    info.get('industry', 'N/A'),
-                    info.get('website', 'N/A'),
-                    info.get('fullTimeEmployees', 'N/A'),
-                    f"{info.get('dividendYield', 0)*100:.2f}%" if info.get('dividendYield') else 'N/A'
+        with col2:
+            st.write("**Returns Statistics**")
+            returns = df['Close'].pct_change().dropna()
+            returns_df = pd.DataFrame({
+                'Metric': ['Daily Return Mean', 'Daily Return Std', 'Volatility (Annual)', 'Sharpe Ratio'],
+                'Value': [
+                    f"{returns.mean()*100:.2f}%",
+                    f"{returns.std()*100:.2f}%",
+                    f"{returns.std() * (252**0.5) * 100:.2f}%",
+                    f"{returns.mean() / returns.std() * (252**0.5):.2f}"
                 ]
             })
-            st.dataframe(info_df, use_container_width=True, hide_index=True)
-        
-        with tab4:
-            st.markdown('<div class="section-title">HISTORICAL DATA</div>', unsafe_allow_html=True)
-            display_df = hist[['Open','High','Low','Close','Volume']].tail(30).reset_index()
-            display_df['Date'] = display_df['Date'].dt.date
-            st.dataframe(display_df, use_container_width=True, hide_index=True, height=450)
-            
-            csv = hist[['Open','High','Low','Close','Volume']].to_csv().encode('utf-8')
-            st.download_button("⬇️ Download CSV", csv, f"{stock}_data.csv", "text/csv")
+            st.dataframe(returns_df, use_container_width=True)
     
-    else:
-        st.error(f"Stock '{stock}' nahi mila!")
-        st.info("Valid symbols: RELIANCE.NS, TCS.NS, INFY.NS, HDFC.NS, WIPRO.NS")
-
+    # Download data
+    st.markdown("---")
+    csv = df.to_csv()
+    st.download_button(
+        label="📥 Download Data as CSV",
+        data=csv,
+        file_name=f"{stock_symbol}_data.csv",
+        mime="text/csv"
+    )
+    
 except Exception as e:
     st.error(f"Error: {str(e)}")
-    st.info("Check your stock symbol. Use .NS for India stocks (e.g., RELIANCE.NS)")
+    st.info("Please check the stock symbol and try again. Examples: AAPL, GOOGL, TSLA, MSFT")
 
+# Footer
 st.markdown("---")
-st.markdown('<p style="text-align:center;color:#444;font-size:0.8rem;">📈 Stock Market Dashboard | Powered by Yahoo Finance</p>', unsafe_allow_html=True)
+st.markdown("Made with ❤️ using Streamlit | Data from Yahoo Finance")

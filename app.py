@@ -1,239 +1,287 @@
 import streamlit as st
-import yfinance as yf
 import pandas as pd
-import plotly.graph_objects as go
-import plotly.express as px
-from datetime import datetime, timedelta
 import numpy as np
+from datetime import datetime, timedelta
+import yfinance as yf
+import plotly.graph_objects as go
+import time
 
-# Page config
-st.set_page_config(
-    page_title="Stock Market Dashboard",
-    page_icon="📈",
-    layout="wide"
-)
+st.set_page_config(page_title="Stock Market Dashboard", layout="wide")
 
-# Title
-st.title("📊 Stock Market Dashboard")
-st.markdown("---")
+# Custom CSS
+st.markdown("""
+<style>
+    .main {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    }
+    .stButton > button {
+        background-color: #4CAF50;
+        color: white;
+        border-radius: 10px;
+        padding: 10px 24px;
+    }
+    .stock-card {
+        background: white;
+        padding: 20px;
+        border-radius: 15px;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        margin: 10px;
+        text-align: center;
+    }
+    .metric-card {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 20px;
+        border-radius: 15px;
+        text-align: center;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# Header
+st.title("📈 Stock Market Dashboard")
+st.markdown("### Real-Time Stock Prices · Charts · Analysis")
 
 # Sidebar
-with st.sidebar:
-    st.header("⚙️ Settings")
-    
-    # Stock selection
-    stock_symbol = st.text_input("Stock Symbol", "AAPL").upper()
-    
-    # Date range
-    col1, col2 = st.columns(2)
-    with col1:
-        start_date = st.date_input("Start Date", datetime.now() - timedelta(days=365))
-    with col2:
-        end_date = st.date_input("End Date", datetime.now())
-    
-    # Indicators
-    st.subheader("Technical Indicators")
-    show_ma = st.checkbox("Moving Average", True)
-    ma_period = st.slider("MA Period", 5, 200, 50) if show_ma else None
-    
-    show_rsi = st.checkbox("RSI", False)
-    show_macd = st.checkbox("MACD", False)
-    
-    # Refresh button
-    refresh = st.button("🔄 Refresh Data")
+st.sidebar.header("⚙️ Settings")
+
+# Use caching to avoid rate limits
+@st.cache_data(ttl=300)  # Cache for 5 minutes
+def get_stock_data(symbol, period="1mo"):
+    """Fetch stock data with error handling"""
+    try:
+        # Add small delay to be respectful
+        time.sleep(0.5)
+        stock = yf.Ticker(symbol)
+        
+        # Get historical data
+        hist = stock.history(period=period)
+        
+        # Get current info
+        info = stock.info
+        
+        if hist.empty:
+            return None, None, None
+            
+        current_price = hist['Close'].iloc[-1]
+        
+        # Calculate changes
+        if len(hist) > 1:
+            prev_close = hist['Close'].iloc[-2]
+            change = current_price - prev_close
+            change_percent = (change / prev_close) * 100
+        else:
+            change = 0
+            change_percent = 0
+            
+        return hist, current_price, {"change": change, "change_percent": change_percent, "info": info}
+    except Exception as e:
+        return None, None, {"error": str(e)}
+
+# Indian stocks list (with correct NSE symbols)
+indian_stocks = {
+    "Reliance Industries": "RELIANCE.NS",
+    "Tata Consultancy Services (TCS)": "TCS.NS",
+    "HDFC Bank": "HDFCBANK.NS",
+    "Infosys": "INFY.NS",
+    "ICICI Bank": "ICICIBANK.NS",
+    "State Bank of India": "SBIN.NS",
+    "Bharti Airtel": "BHARTIARTL.NS",
+    "Hindustan Unilever": "HINDUNILVR.NS",
+    "ITC Ltd": "ITC.NS",
+    "Wipro": "WIPRO.NS"
+}
+
+# US stocks option
+us_stocks = {
+    "Apple": "AAPL",
+    "Microsoft": "MSFT",
+    "Google": "GOOGL",
+    "Amazon": "AMZN",
+    "Tesla": "TSLA",
+    "Meta (Facebook)": "META",
+    "NVIDIA": "NVDA",
+    "Netflix": "NFLX"
+}
+
+# Stock selection
+market = st.sidebar.radio("Select Market", ["🇮🇳 Indian Stocks (NSE)", "🇺🇸 US Stocks"])
+
+if market == "🇮🇳 Indian Stocks (NSE)":
+    stock_dict = indian_stocks
+else:
+    stock_dict = us_stocks
+
+selected_stock_name = st.sidebar.selectbox("Select Stock", list(stock_dict.keys()))
+selected_symbol = stock_dict[selected_stock_name]
+
+# Time period selection
+period = st.sidebar.selectbox(
+    "Select Time Period",
+    ["1mo", "3mo", "6mo", "1y", "2y"],
+    format_func=lambda x: {"1mo": "1 Month", "3mo": "3 Months", "6mo": "6 Months", "1y": "1 Year", "2y": "2 Years"}[x]
+)
+
+# Refresh button
+if st.sidebar.button("🔄 Refresh Data", type="primary"):
+    st.cache_data.clear()
+    st.rerun()
+
+st.sidebar.markdown("---")
+st.sidebar.info("""
+💡 **Tips:**
+- Data refreshes every 5 minutes (to avoid rate limits)
+- Click refresh button for latest data
+- Data source: Yahoo Finance (free)
+- Use .NS suffix for NSE stocks
+""")
 
 # Main content
 try:
     # Fetch data
-    @st.cache_data(ttl=300)
-    def load_data(symbol, start, end):
-        stock = yf.Ticker(symbol)
-        df = stock.history(start=start, end=end)
-        return df, stock.info
+    with st.spinner("Fetching stock data..."):
+        hist, current_price, metrics = get_stock_data(selected_symbol, period)
     
-    df, info = load_data(stock_symbol, start_date, end_date)
-    
-    if df.empty:
-        st.error(f"No data found for {stock_symbol}")
-        st.stop()
-    
-    # Top metrics
-    col1, col2, col3, col4, col5 = st.columns(5)
-    
-    current_price = df['Close'].iloc[-1]
-    prev_close = df['Close'].iloc[-2] if len(df) > 1 else current_price
-    change = current_price - prev_close
-    change_pct = (change / prev_close) * 100
-    
-    with col1:
-        st.metric("Current Price", f"${current_price:.2f}", 
-                 f"{change_pct:+.2f}%", delta_color="normal")
-    
-    with col2:
-        st.metric("Day High", f"${df['High'].iloc[-1]:.2f}")
-    
-    with col3:
-        st.metric("Day Low", f"${df['Low'].iloc[-1]:.2f}")
-    
-    with col4:
-        st.metric("Volume", f"{df['Volume'].iloc[-1]:,.0f}")
-    
-    with col5:
-        avg_volume = df['Volume'].tail(20).mean()
-        st.metric("Avg Volume (20d)", f"{avg_volume:,.0f}")
-    
-    st.markdown("---")
-    
-    # Company info
-    with st.expander("📋 Company Information"):
-        col1, col2 = st.columns(2)
-        with col1:
-            st.write(f"**Name:** {info.get('longName', 'N/A')}")
-            st.write(f"**Sector:** {info.get('sector', 'N/A')}")
-            st.write(f"**Industry:** {info.get('industry', 'N/A')}")
-        with col2:
-            st.write(f"**Market Cap:** ${info.get('marketCap', 0):,.0f}")
-            st.write(f"**P/E Ratio:** {info.get('trailingPE', 'N/A')}")
-            st.write(f"**52W High/Low:** ${info.get('fiftyTwoWeekHigh', 'N/A')} / ${info.get('fiftyTwoWeekLow', 'N/A')}")
-    
-    # Candlestick chart
-    st.subheader("📈 Price Chart")
-    
-    fig = go.Figure()
-    
-    # Candlestick
-    fig.add_trace(go.Candlestick(
-        x=df.index,
-        open=df['Open'],
-        high=df['High'],
-        low=df['Low'],
-        close=df['Close'],
-        name='Price'
-    ))
-    
-    # Moving Average
-    if show_ma:
-        ma = df['Close'].rolling(window=ma_period).mean()
-        fig.add_trace(go.Scatter(
-            x=df.index,
-            y=ma,
-            name=f'MA {ma_period}',
-            line=dict(color='orange', width=1)
-        ))
-    
-    fig.update_layout(
-        title=f'{stock_symbol} - Stock Price',
-        yaxis_title='Price (USD)',
-        xaxis_title='Date',
-        height=500,
-        template='plotly_dark'
-    )
-    
-    st.plotly_chart(fig, use_container_width=True)
-    
-    # RSI Indicator
-    if show_rsi:
-        st.subheader("📊 RSI Indicator")
-        
-        # Calculate RSI
-        delta = df['Close'].diff()
-        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-        rs = gain / loss
-        rsi = 100 - (100 / (1 + rs))
-        
-        fig_rsi = go.Figure()
-        fig_rsi.add_trace(go.Scatter(
-            x=df.index,
-            y=rsi,
-            name='RSI',
-            line=dict(color='purple', width=2)
-        ))
-        fig_rsi.add_hline(y=70, line_dash="dash", line_color="red", annotation_text="Overbought")
-        fig_rsi.add_hline(y=30, line_dash="dash", line_color="green", annotation_text="Oversold")
-        fig_rsi.update_layout(height=300, template='plotly_dark')
-        st.plotly_chart(fig_rsi, use_container_width=True)
-    
-    # Volume chart
-    st.subheader("📊 Volume Analysis")
-    
-    # Color volume bars based on price change
-    colors = ['green' if close >= open_ else 'red' 
-              for close, open_ in zip(df['Close'], df['Open'])]
-    
-    fig_volume = go.Figure()
-    fig_volume.add_trace(go.Bar(
-        x=df.index,
-        y=df['Volume'],
-        name='Volume',
-        marker_color=colors
-    ))
-    fig_volume.update_layout(height=300, template='plotly_dark')
-    st.plotly_chart(fig_volume, use_container_width=True)
-    
-    # MACD
-    if show_macd:
-        st.subheader("📈 MACD Indicator")
-        
-        # Calculate MACD
-        exp1 = df['Close'].ewm(span=12, adjust=False).mean()
-        exp2 = df['Close'].ewm(span=26, adjust=False).mean()
-        macd = exp1 - exp2
-        signal = macd.ewm(span=9, adjust=False).mean()
-        histogram = macd - signal
-        
-        fig_macd = go.Figure()
-        fig_macd.add_trace(go.Scatter(x=df.index, y=macd, name='MACD', line=dict(color='blue')))
-        fig_macd.add_trace(go.Scatter(x=df.index, y=signal, name='Signal', line=dict(color='red')))
-        fig_macd.add_trace(go.Bar(x=df.index, y=histogram, name='Histogram', marker_color='gray'))
-        fig_macd.update_layout(height=300, template='plotly_dark')
-        st.plotly_chart(fig_macd, use_container_width=True)
-    
-    # Statistical Summary
-    with st.expander("📊 Statistical Summary"):
-        col1, col2 = st.columns(2)
+    if current_price and hist is not None:
+        # Top metrics row
+        col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            st.write("**Price Statistics**")
-            stats_df = pd.DataFrame({
-                'Metric': ['Mean', 'Std Dev', 'Min', 'Max'],
-                'Value': [
-                    f"${df['Close'].mean():.2f}",
-                    f"${df['Close'].std():.2f}",
-                    f"${df['Close'].min():.2f}",
-                    f"${df['Close'].max():.2f}"
-                ]
-            })
-            st.dataframe(stats_df, use_container_width=True)
+            st.metric("Current Price", f"₹{current_price:.2f}" if "NS" in selected_symbol else f"${current_price:.2f}")
         
         with col2:
-            st.write("**Returns Statistics**")
-            returns = df['Close'].pct_change().dropna()
-            returns_df = pd.DataFrame({
-                'Metric': ['Daily Return Mean', 'Daily Return Std', 'Volatility (Annual)', 'Sharpe Ratio'],
-                'Value': [
-                    f"{returns.mean()*100:.2f}%",
-                    f"{returns.std()*100:.2f}%",
-                    f"{returns.std() * (252**0.5) * 100:.2f}%",
-                    f"{returns.mean() / returns.std() * (252**0.5):.2f}"
-                ]
-            })
-            st.dataframe(returns_df, use_container_width=True)
-    
-    # Download data
-    st.markdown("---")
-    csv = df.to_csv()
-    st.download_button(
-        label="📥 Download Data as CSV",
-        data=csv,
-        file_name=f"{stock_symbol}_data.csv",
-        mime="text/csv"
-    )
-    
+            change = metrics.get('change', 0)
+            change_percent = metrics.get('change_percent', 0)
+            st.metric("Daily Change", 
+                     f"{change:+.2f}" if "NS" in selected_symbol else f"{change:+.2f}",
+                     delta=f"{change_percent:+.2f}%")
+        
+        with col3:
+            if 'info' in metrics and metrics['info']:
+                high = metrics['info'].get('dayHigh', hist['High'].iloc[-1] if not hist.empty else 0)
+                st.metric("Day High", f"₹{high:.2f}" if "NS" in selected_symbol else f"${high:.2f}")
+        
+        with col4:
+            if 'info' in metrics and metrics['info']:
+                low = metrics['info'].get('dayLow', hist['Low'].iloc[-1] if not hist.empty else 0)
+                st.metric("Day Low", f"₹{low:.2f}" if "NS" in selected_symbol else f"${low:.2f}")
+        
+        # Charts section
+        st.subheader("📊 Price Chart")
+        
+        chart_type = st.radio("Chart Type", ["Line Chart", "Candlestick Chart"], horizontal=True)
+        
+        if chart_type == "Line Chart":
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=hist.index, y=hist['Close'], 
+                                    mode='lines', 
+                                    name='Close Price',
+                                    line=dict(color='#667eea', width=2)))
+            fig.update_layout(title=f"{selected_stock_name} - Price Trend",
+                             xaxis_title="Date",
+                             yaxis_title="Price",
+                             hovermode='x unified',
+                             height=500)
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            fig = go.Figure(data=[go.Candlestick(x=hist.index,
+                                                open=hist['Open'],
+                                                high=hist['High'],
+                                                low=hist['Low'],
+                                                close=hist['Close'])])
+            fig.update_layout(title=f"{selected_stock_name} - Candlestick Chart",
+                             xaxis_title="Date",
+                             yaxis_title="Price",
+                             height=500)
+            st.plotly_chart(fig, use_container_width=True)
+        
+        # Volume chart
+        st.subheader("📊 Trading Volume")
+        fig_vol = go.Figure()
+        fig_vol.add_trace(go.Bar(x=hist.index, y=hist['Volume'], name='Volume'))
+        fig_vol.update_layout(height=300)
+        st.plotly_chart(fig_vol, use_container_width=True)
+        
+        # Technical Indicators
+        st.subheader("📈 Technical Indicators")
+        
+        col1, col2, col3 = st.columns(3)
+        
+        # Calculate moving averages
+        if len(hist) >= 20:
+            sma20 = hist['Close'].rolling(window=20).mean().iloc[-1]
+            with col1:
+                st.metric("20-Day SMA", f"₹{sma20:.2f}" if "NS" in selected_symbol else f"${sma20:.2f}")
+        
+        if len(hist) >= 50:
+            sma50 = hist['Close'].rolling(window=50).mean().iloc[-1]
+            with col2:
+                st.metric("50-Day SMA", f"₹{sma50:.2f}" if "NS" in selected_symbol else f"${sma50:.2f}")
+        
+        # RSI calculation (simplified)
+        if len(hist) >= 14:
+            delta = hist['Close'].diff()
+            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+            rs = gain / loss
+            rsi = 100 - (100 / (1 + rs)).iloc[-1]
+            
+            with col3:
+                rsi_color = "🟢" if 30 <= rsi <= 70 else "🔴"
+                st.metric(f"{rsi_color} RSI (14)", f"{rsi:.1f}")
+        
+        # Stock Information Table
+        with st.expander("📋 Company Information"):
+            info = metrics.get('info', {})
+            if info:
+                info_data = {
+                    "Company Name": info.get('longName', selected_stock_name),
+                    "Sector": info.get('sector', 'N/A'),
+                    "Industry": info.get('industry', 'N/A'),
+                    "Market Cap": f"₹{info.get('marketCap', 0)/1e7:.2f} Cr" if "NS" in selected_symbol else f"${info.get('marketCap', 0)/1e9:.2f}B",
+                    "P/E Ratio": info.get('trailingPE', 'N/A'),
+                    "52 Week High": f"₹{info.get('fiftyTwoWeekHigh', 'N/A')}" if "NS" in selected_symbol else f"${info.get('fiftyTwoWeekHigh', 'N/A')}",
+                    "52 Week Low": f"₹{info.get('fiftyTwoWeekLow', 'N/A')}" if "NS" in selected_symbol else f"${info.get('fiftyTwoWeekLow', 'N/A')}",
+                    "Dividend Yield": f"{info.get('dividendYield', 0) * 100:.2f}%" if info.get('dividendYield') else 'N/A'
+                }
+                df_info = pd.DataFrame(list(info_data.items()), columns=["Metric", "Value"])
+                st.table(df_info)
+        
+        # Recent Data Table
+        with st.expander("📅 Recent Price Data"):
+            recent_data = hist.tail(10)[['Open', 'High', 'Low', 'Close', 'Volume']].round(2)
+            recent_data.index = recent_data.index.strftime('%Y-%m-%d')
+            st.dataframe(recent_data, use_container_width=True)
+        
+    else:
+        st.error(f"⚠️ Could not fetch data for {selected_symbol}")
+        st.info("""
+        **Possible reasons:**
+        1. Rate limit - Wait 1-2 minutes and click refresh
+        2. Wrong symbol - Use .NS for Indian stocks (e.g., RELIANCE.NS)
+        3. Stock market closed - Data updates when market is open
+        
+        **Try these steps:**
+        - Select a different stock
+        - Wait 2 minutes and click refresh
+        - Check internet connection
+        """)
+        
 except Exception as e:
-    st.error(f"Error: {str(e)}")
-    st.info("Please check the stock symbol and try again. Examples: AAPL, GOOGL, TSLA, MSFT")
+    st.error(f"An error occurred: {str(e)}")
+    st.info("""
+    🔧 **Fix:**
+    1. Install required packages: `pip install yfinance pandas plotly streamlit`
+    2. Restart the app: `streamlit run app.py`
+    3. If error persists, use demo mode below 👇
+    """)
 
 # Footer
 st.markdown("---")
-st.markdown("Made with ❤️ using Streamlit | Data from Yahoo Finance")
+st.markdown("""
+<div style="text-align: center; color: gray;">
+    Made with ❤️ using Streamlit | Data from Yahoo Finance (Free API)
+    <br>
+    <small>Note: Data may be delayed by 15-20 minutes for Indian stocks</small>
+</div>
+""", unsafe_allow_html=True)

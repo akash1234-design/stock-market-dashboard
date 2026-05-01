@@ -1,300 +1,154 @@
 import streamlit as st
+import yfinance as yf
 import pandas as pd
-import numpy as np
 import plotly.graph_objects as go
+import plotly.express as px
 from datetime import datetime, timedelta
-import time
-import json
 
-# Page config
-st.set_page_config(
-    page_title="Stock Market Dashboard",
-    page_icon="📈",
-    layout="wide"
-)
+st.set_page_config(page_title="Stock Market Dashboard", page_icon="📈", layout="wide")
 
-# Custom CSS
 st.markdown("""
 <style>
-    .stApp {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    }
-    .main-header {
-        text-align: center;
-        color: white;
-        padding: 20px;
-        border-radius: 10px;
-        background: rgba(0,0,0,0.3);
-        margin-bottom: 20px;
-    }
-    .stock-card {
-        background: white;
-        padding: 15px;
-        border-radius: 10px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        text-align: center;
-    }
-    .metric-value {
-        font-size: 24px;
-        font-weight: bold;
-    }
-    .positive {
-        color: #00ff00;
-    }
-    .negative {
-        color: #ff0000;
-    }
+@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;600;700&display=swap');
+html, body, [class*="css"] { background-color: #0a0a1a; color: #fff; font-family: 'Inter', sans-serif; }
+.stApp { background-color: #0a0a1a; }
+.hero {
+    background: linear-gradient(135deg, #00FF00 0%, #00CC00 50%, #1a0a4a 100%);
+    padding: 2.5rem; border-radius: 20px; margin-bottom: 2rem; text-align: center;
+    box-shadow: 0 8px 32px rgba(0,255,0,0.3);
+}
+.hero h1 { font-family:'Bebas Neue',sans-serif; font-size:3.5rem; letter-spacing:4px; color:#fff; margin:0; }
+.hero p { color:#99ff99; margin-top:0.5rem; }
+.metric-card {
+    background: linear-gradient(135deg,#1a1a2e,#16213e); border:1px solid #00FF00;
+    border-radius:16px; padding:1.3rem; text-align:center; margin-bottom:1rem;
+    box-shadow:0 4px 15px rgba(0,255,0,0.15);
+}
+.metric-number { font-family:'Bebas Neue',sans-serif; font-size:2.5rem; color:#00FF00; }
+.metric-label { color:#aaa; font-size:0.8rem; text-transform:uppercase; letter-spacing:2px; }
+.section-title {
+    font-family:'Bebas Neue',sans-serif; font-size:1.8rem; color:#00FF00;
+    letter-spacing:3px; border-left:4px solid #00FF00; padding-left:12px; margin:1.5rem 0 1rem 0;
+}
+[data-testid="stSidebar"] { background-color:#0d0d1a !important; border-right:1px solid #00FF00; }
+.stTabs [data-baseweb="tab-list"] { background-color:#1a1a2e; border-radius:10px; }
+.stTabs [aria-selected="true"] { color:#00FF00 !important; border-bottom:2px solid #00FF00; }
+.stButton > button {
+    background:linear-gradient(135deg,#00FF00,#00CC00); color:#000; border:none;
+    border-radius:10px; font-weight:700; padding:0.6rem 2rem; transition:all 0.2s;
+}
+.stButton > button:hover { transform:scale(1.03); }
+#MainMenu, footer, header { visibility:hidden; }
 </style>
 """, unsafe_allow_html=True)
 
-# Header
-st.markdown('<div class="main-header"><h1>📈 STOCK MARKET DASHBOARD</h1><p>Real-Time Stock Prices · Charts · Analysis</p></div>', unsafe_allow_html=True)
-
-# Sidebar
-st.sidebar.header("⚙️ Settings")
-
-# Try to import yfinance with error handling
-try:
-    import yfinance as yf
-    YFINANCE_AVAILABLE = True
-except ImportError:
-    YFINANCE_AVAILABLE = False
-    st.sidebar.error("⚠️ yfinance not installed")
-
-# Use sample data if yfinance fails
-@st.cache_data(ttl=300)
-def get_sample_data():
-    """Generate sample data for demo"""
-    dates = pd.date_range(start='2024-01-01', end='2024-12-31', freq='D')
-    data = {
-        'RELIANCE.NS': np.random.normal(2500, 100, len(dates)),
-        'TCS.NS': np.random.normal(3500, 150, len(dates)),
-        'HDFCBANK.NS': np.random.normal(1600, 80, len(dates)),
-        'INFY.NS': np.random.normal(1400, 70, len(dates))
-    }
-    df = pd.DataFrame(data, index=dates)
-    return df
-
-@st.cache_data(ttl=300)
-def get_stock_data(symbol, period="1mo"):
-    """Fetch stock data with fallback to sample data"""
-    if YFINANCE_AVAILABLE:
-        try:
-            stock = yf.Ticker(symbol)
-            hist = stock.history(period=period)
-            if not hist.empty:
-                current_price = hist['Close'].iloc[-1]
-                if len(hist) > 1:
-                    prev_close = hist['Close'].iloc[-2]
-                    change = current_price - prev_close
-                    change_percent = (change / prev_close) * 100
-                else:
-                    change = 0
-                    change_percent = 0
-                return hist, current_price, change, change_percent
-        except:
-            pass
-    
-    # Fallback to sample data
-    sample_data = get_sample_data()
-    if symbol in sample_data.columns:
-        hist = pd.DataFrame(sample_data[symbol])
-        hist.columns = ['Close']
-        current_price = hist['Close'].iloc[-1]
-        change = np.random.uniform(-50, 50)
-        change_percent = (change / current_price) * 100
-        return hist, current_price, change, change_percent
-    else:
-        return None, None, None, None
-
-# Stock selection
-st.sidebar.subheader("📊 Select Stocks")
-
-# Indian Stocks
-indian_stocks = {
-    "Reliance Industries": "RELIANCE.NS",
-    "Tata Consultancy Services": "TCS.NS",
-    "HDFC Bank": "HDFCBANK.NS",
-    "Infosys": "INFY.NS",
-    "ICICI Bank": "ICICIBANK.NS",
-    "State Bank of India": "SBIN.NS"
-}
-
-# US Stocks
-us_stocks = {
-    "Apple": "AAPL",
-    "Microsoft": "MSFT",
-    "Google": "GOOGL",
-    "Amazon": "AMZN",
-    "Tesla": "TSLA"
-}
-
-market_type = st.sidebar.radio("Select Market", ["🇮🇳 Indian Stocks", "🇺🇸 US Stocks"])
-
-if market_type == "🇮🇳 Indian Stocks":
-    stock_options = indian_stocks
-    currency = "₹"
-else:
-    stock_options = us_stocks
-    currency = "$"
-
-selected_stock = st.sidebar.selectbox("Choose Stock", list(stock_options.keys()))
-symbol = stock_options[selected_stock]
-
-# Time period
-period = st.sidebar.selectbox(
-    "Time Period",
-    ["1mo", "3mo", "6mo", "1y"],
-    format_func=lambda x: {"1mo": "1 Month", "3mo": "3 Months", "6mo": "6 Months", "1y": "1 Year"}[x]
-)
-
-# Refresh button
-if st.sidebar.button("🔄 Refresh Data", type="primary"):
-    st.cache_data.clear()
-    st.rerun()
-
-st.sidebar.markdown("---")
-st.sidebar.info("""
-💡 **Tips:**
-- Data updates every 5 minutes
-- Click refresh for latest data
-- Demo mode works without internet
-""")
-
-# Main content
-try:
-    # Fetch data
-    with st.spinner("Loading stock data..."):
-        hist, current_price, change, change_percent = get_stock_data(symbol, period)
-    
-    if current_price:
-        # Display current price
-        col1, col2, col3, col4 = st.columns(4)
-        
-        with col1:
-            st.markdown(f"""
-            <div class="stock-card">
-                <h3>Current Price</h3>
-                <div class="metric-value">{currency}{current_price:.2f}</div>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        with col2:
-            color_class = "positive" if change >= 0 else "negative"
-            arrow = "▲" if change >= 0 else "▼"
-            st.markdown(f"""
-            <div class="stock-card">
-                <h3>Daily Change</h3>
-                <div class="metric-value {color_class}">{arrow} {currency}{abs(change):.2f}</div>
-                <div class="{color_class}">{change_percent:+.2f}%</div>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        with col3:
-            if hist is not None:
-                high = hist['Close'].max()
-                st.markdown(f"""
-                <div class="stock-card">
-                    <h3>Period High</h3>
-                    <div class="metric-value">{currency}{high:.2f}</div>
-                </div>
-                """, unsafe_allow_html=True)
-        
-        with col4:
-            if hist is not None:
-                low = hist['Close'].min()
-                st.markdown(f"""
-                <div class="stock-card">
-                    <h3>Period Low</h3>
-                    <div class="metric-value">{currency}{low:.2f}</div>
-                </div>
-                """, unsafe_allow_html=True)
-        
-        # Chart
-        st.subheader("📈 Price Chart")
-        
-        if hist is not None:
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(
-                x=hist.index,
-                y=hist['Close'],
-                mode='lines',
-                name='Close Price',
-                line=dict(color='#667eea', width=2)
-            ))
-            
-            fig.update_layout(
-                title=f"{selected_stock} - Price Trend",
-                xaxis_title="Date",
-                yaxis_title=f"Price ({currency})",
-                hovermode='x unified',
-                height=500,
-                template='plotly_dark'
-            )
-            
-            st.plotly_chart(fig, use_container_width=True)
-            
-            # Volume chart if available
-            if 'Volume' in hist.columns:
-                st.subheader("📊 Trading Volume")
-                fig_vol = go.Figure()
-                fig_vol.add_trace(go.Bar(
-                    x=hist.index,
-                    y=hist['Volume'],
-                    name='Volume',
-                    marker_color='#764ba2'
-                ))
-                fig_vol.update_layout(height=300, template='plotly_dark')
-                st.plotly_chart(fig_vol, use_container_width=True)
-            
-            # Statistics
-            with st.expander("📊 Statistical Summary"):
-                stats = hist['Close'].describe()
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.write("**Price Statistics:**")
-                    st.write(f"Mean: {currency}{stats['mean']:.2f}")
-                    st.write(f"Std Dev: {currency}{stats['std']:.2f}")
-                with col2:
-                    st.write("**Range:**")
-                    st.write(f"Min: {currency}{stats['min']:.2f}")
-                    st.write(f"Max: {currency}{stats['max']:.2f}")
-            
-            # Recent data table
-            with st.expander("📅 Recent Price Data"):
-                recent = hist.tail(10)[['Close']].round(2)
-                recent.index = recent.index.strftime('%Y-%m-%d')
-                st.dataframe(recent, use_container_width=True)
-        
-    else:
-        st.warning(f"⚠️ Could not fetch data for {selected_stock}")
-        st.info("""
-        **Possible reasons:**
-        - Stock symbol might be incorrect
-        - API rate limit reached (wait 2 minutes)
-        - No internet connection
-        
-        **Try:**
-        - Click refresh button after 2 minutes
-        - Select a different stock
-        - Check your internet connection
-        """)
-
-except Exception as e:
-    st.error(f"An error occurred: {str(e)}")
-    st.info("""
-    🔧 **Quick Fix:**
-    1. Refresh the page
-    2. Wait 2 minutes and try again
-    3. Check if all packages are installed
-    """)
-
-# Footer
-st.markdown("---")
 st.markdown("""
-<div style="text-align: center; color: gray;">
-    Made with ❤️ using Streamlit | Data from Yahoo Finance
-    <br>
-    <small>📌 Tip: If data doesn't load, wait 2 minutes and click refresh</small>
+<div class="hero">
+    <h1>📈 STOCK MARKET DASHBOARD</h1>
+    <p>Real-Time Stock Prices • Charts • Analysis • Portfolio</p>
 </div>
 """, unsafe_allow_html=True)
+
+with st.sidebar:
+    st.markdown("## 📊 Stock Search")
+    stock = st.text_input("Stock Symbol (e.g., RELIANCE.NS)", "RELIANCE.NS", label_visibility="collapsed")
+    period = st.selectbox("Time Period", ["1mo","3mo","6mo","1y","2y","5y"])
+    st.markdown("---")
+    st.info("Indian Stocks: RELIANCE.NS, TCS.NS, INFY.NS, HDFC.NS, WIPRO.NS")
+
+try:
+    ticker = yf.Ticker(stock)
+    hist = ticker.history(period=period)
+    info = ticker.info
+    
+    if len(hist) > 0:
+        current_price = hist['Close'].iloc[-1]
+        prev_price = hist['Close'].iloc[0]
+        change = current_price - prev_price
+        change_pct = (change / prev_price * 100) if prev_price != 0 else 0
+        
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            st.markdown(f'<div class="metric-card"><div class="metric-number">₹{current_price:.2f}</div><div class="metric-label">Current Price</div></div>', unsafe_allow_html=True)
+        with c2:
+            color = "🟢" if change >= 0 else "🔴"
+            st.markdown(f'<div class="metric-card"><div class="metric-number">{color} {change:.2f}</div><div class="metric-label">Change</div></div>', unsafe_allow_html=True)
+        with c3:
+            st.markdown(f'<div class="metric-card"><div class="metric-number">{change_pct:.2f}%</div><div class="metric-label">Change %</div></div>', unsafe_allow_html=True)
+        with c4:
+            market_cap = info.get('marketCap', 0)
+            if market_cap > 0:
+                st.markdown(f'<div class="metric-card"><div class="metric-number">₹{market_cap/100000000:.0f}Cr</div><div class="metric-label">Market Cap</div></div>', unsafe_allow_html=True)
+        
+        tab1, tab2, tab3, tab4 = st.tabs(["📊 Chart", "📈 Stats", "💼 Info", "🔍 Details"])
+        
+        GREEN = "#00FF00"
+        
+        with tab1:
+            st.markdown('<div class="section-title">PRICE CHART</div>', unsafe_allow_html=True)
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(x=hist.index, y=hist['Close'],
+                                    mode='lines', name='Price',
+                                    line=dict(color=GREEN, width=3),
+                                    fill='tozeroy', fillcolor='rgba(0,255,0,0.1)'))
+            fig.update_layout(
+                plot_bgcolor="rgba(0,0,0,0)", 
+                paper_bgcolor="rgba(0,0,0,0)",
+                font=dict(color="white"), 
+                hovermode='x unified',
+                xaxis=dict(gridcolor="#222"),
+                yaxis=dict(gridcolor="#222")
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        
+        with tab2:
+            st.markdown('<div class="section-title">TECHNICAL STATS</div>', unsafe_allow_html=True)
+            ma_50 = hist['Close'].rolling(50).mean().iloc[-1] if len(hist) >= 50 else 0
+            ma_200 = hist['Close'].rolling(200).mean().iloc[-1] if len(hist) >= 200 else 0
+            
+            stats_df = pd.DataFrame({
+                "Metric": ["52 Week High", "52 Week Low", "200 Day MA", "50 Day MA", "Volume Avg", "PE Ratio"],
+                "Value": [
+                    f"₹{info.get('fiftyTwoWeekHigh', 'N/A')}",
+                    f"₹{info.get('fiftyTwoWeekLow', 'N/A')}",
+                    f"₹{ma_200:.2f}" if ma_200 > 0 else "N/A",
+                    f"₹{ma_50:.2f}" if ma_50 > 0 else "N/A",
+                    f"{info.get('averageVolume', 'N/A'):,}",
+                    f"{info.get('trailingPE', 'N/A')}"
+                ]
+            })
+            st.dataframe(stats_df, use_container_width=True, hide_index=True)
+        
+        with tab3:
+            st.markdown('<div class="section-title">COMPANY INFO</div>', unsafe_allow_html=True)
+            info_df = pd.DataFrame({
+                "Field": ["Sector", "Industry", "Website", "Employees", "Dividend Yield"],
+                "Value": [
+                    info.get('sector', 'N/A'),
+                    info.get('industry', 'N/A'),
+                    info.get('website', 'N/A'),
+                    info.get('fullTimeEmployees', 'N/A'),
+                    f"{info.get('dividendYield', 0)*100:.2f}%" if info.get('dividendYield') else 'N/A'
+                ]
+            })
+            st.dataframe(info_df, use_container_width=True, hide_index=True)
+        
+        with tab4:
+            st.markdown('<div class="section-title">HISTORICAL DATA</div>', unsafe_allow_html=True)
+            display_df = hist[['Open','High','Low','Close','Volume']].tail(30).reset_index()
+            display_df['Date'] = display_df['Date'].dt.date
+            st.dataframe(display_df, use_container_width=True, hide_index=True, height=450)
+            
+            csv = hist[['Open','High','Low','Close','Volume']].to_csv().encode('utf-8')
+            st.download_button("⬇️ Download CSV", csv, f"{stock}_data.csv", "text/csv")
+    
+    else:
+        st.error(f"Stock '{stock}' nahi mila!")
+        st.info("Valid symbols: RELIANCE.NS, TCS.NS, INFY.NS, HDFC.NS, WIPRO.NS")
+
+except Exception as e:
+    st.error(f"Error: {str(e)}")
+    st.info("Check your stock symbol. Use .NS for India stocks (e.g., RELIANCE.NS)")
+
+st.markdown("---")
+st.markdown('<p style="text-align:center;color:#444;font-size:0.8rem;">📈 Stock Market Dashboard | Powered by Yahoo Finance</p>', unsafe_allow_html=True)
